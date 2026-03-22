@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Logic Gate Simulator</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #242836;
+    --border: #2e3345;
+    --text: #e2e4ea;
+    --text-muted: #8b8fa3;
+    --accent: #4f8ff7;
+    --accent-dim: #2a4a8a;
+    --green: #34d399;
+    --red: #f87171;
+    --orange: #fb923c;
+    --yellow: #fbbf24;
+  }
+  body { font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; user-select: none; }
+  header { display: flex; align-items: center; gap: 16px; padding: 12px 20px; background: var(--surface); border-bottom: 1px solid var(--border); z-index: 10; flex-wrap: wrap; }
+  header h1 { font-size: 15px; font-weight: 600; letter-spacing: 0.5px; }
+  header h1 span { color: var(--accent); }
+  .toolbar { display: flex; gap: 6px; margin-left: 24px; flex-wrap: wrap; }
+  .toolbar button { padding: 7px 14px; background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; color: var(--text); font-family: inherit; font-size: 12px; cursor: pointer; transition: background 0.15s, border-color 0.15s; display: flex; align-items: center; gap: 6px; position: relative; }
+  .toolbar button:hover { background: var(--border); border-color: var(--accent-dim); }
+  .toolbar button:active { transform: scale(0.97); }
+  .toolbar button .gate-tip { display: none; position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%); margin-bottom: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; width: 240px; font-size: 11px; line-height: 1.5; color: var(--text-muted); text-align: left; box-shadow: 0 8px 24px rgba(0,0,0,0.4); pointer-events: none; z-index: 50; white-space: normal; }
+  .toolbar button .gate-tip strong { color: var(--text); display: block; margin-bottom: 4px; font-size: 12px; }
+  .toolbar button:hover .gate-tip { display: block; }
+  .toolbar .sep { width: 1px; background: var(--border); margin: 0 6px; }
+  .actions { margin-left: auto; display: flex; gap: 6px; }
+  .actions button { padding: 7px 14px; background: var(--accent-dim); border: 1px solid var(--accent); border-radius: 6px; color: var(--text); font-family: inherit; font-size: 12px; cursor: pointer; transition: background 0.15s; }
+  .actions button:hover { background: var(--accent); }
+  .main { display: flex; flex: 1; overflow: hidden; }
+  #canvas-wrap { flex: 1; position: relative; overflow: hidden; cursor: grab; }
+  #canvas-wrap.dragging-gate { cursor: default; }
+  #canvas-wrap.panning { cursor: grabbing; }
+  svg#wires { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 1; }
+  svg#wires path { fill: none; stroke-width: 2.5; stroke-linecap: round; }
+  svg#wires .wire-bg { stroke: var(--border); stroke-width: 4; }
+  svg#wires .wire-active { stroke: var(--green); filter: drop-shadow(0 0 4px rgba(52,211,153,0.4)); }
+  svg#wires .wire-inactive { stroke: var(--text-muted); }
+  svg#wires .wire-preview { stroke: var(--accent); stroke-dasharray: 6 4; stroke-width: 2; opacity: 0.7; }
+
+  /* Signal flow animation */
+  @keyframes signal-flow {
+    0% { stroke-dashoffset: 16; }
+    100% { stroke-dashoffset: 0; }
+  }
+  svg#wires .wire-pulse {
+    stroke: var(--green);
+    stroke-width: 3;
+    stroke-dasharray: 8 8;
+    opacity: 0.8;
+    animation: signal-flow 0.5s linear infinite;
+    filter: drop-shadow(0 0 6px rgba(52,211,153,0.6));
+  }
+
+  .gate {
+    position: absolute; z-index: 2;
+    background: var(--surface);
+    border: 1.5px solid var(--border);
+    border-radius: 10px;
+    min-width: 90px;
+    cursor: grab;
+    transition: box-shadow 0.15s;
+  }
+  .gate:hover { box-shadow: 0 0 0 1px var(--accent-dim), 0 4px 20px rgba(0,0,0,0.3); }
+  .gate.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-dim), 0 4px 24px rgba(79,143,247,0.15); }
+  .gate-header { padding: 6px 12px; font-size: 11px; font-weight: 600; text-align: center; letter-spacing: 1px; text-transform: uppercase; border-bottom: 1px solid var(--border); color: var(--text-muted); display: flex; align-items: center; justify-content: center; gap: 6px; }
+  .gate-header .pin-count-btns { display: flex; gap: 2px; }
+  .gate-header .pin-count-btn { width: 18px; height: 18px; border-radius: 4px; border: 1px solid var(--border); background: var(--surface2); color: var(--text-muted); font-size: 12px; font-weight: 700; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.12s; line-height: 1; padding: 0; }
+  .gate-header .pin-count-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+  .gate-theory { padding: 4px 10px; font-size: 9px; color: var(--text-muted); text-align: center; line-height: 1.4; border-bottom: 1px solid var(--border); font-style: italic; opacity: 0.8; }
+  .gate-body { display: flex; justify-content: space-between; padding: 10px 0; min-height: 44px; }
+  .gate-pins { display: flex; flex-direction: column; gap: 8px; }
+  .gate-pins.inputs { padding-left: 0; }
+  .gate-pins.outputs { padding-right: 0; }
+  .pin {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    border: 2px solid var(--border);
+    background: var(--surface2);
+    cursor: crosshair;
+    position: relative;
+    transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+  }
+  .pin.input-pin { margin-left: -7px; }
+  .pin.output-pin { margin-right: -7px; }
+  .pin:hover { border-color: var(--accent); box-shadow: 0 0 8px rgba(79,143,247,0.4); }
+  .pin.active { background: var(--green); border-color: var(--green); box-shadow: 0 0 8px rgba(52,211,153,0.5); }
+  .pin.value-0 { background: var(--surface2); border-color: var(--text-muted); }
+
+  .input-node .gate-body { justify-content: center; padding: 8px 0; gap: 8px; align-items: center; }
+  .input-node .toggle-btn {
+    width: 36px; height: 36px; border-radius: 8px; border: 2px solid var(--border);
+    background: var(--surface2); color: var(--text-muted); font-family: inherit;
+    font-size: 16px; font-weight: 700; cursor: pointer; transition: all 0.15s;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .input-node .toggle-btn.on { background: var(--green); border-color: var(--green); color: var(--bg); }
+  .input-node .input-label { font-size: 10px; color: var(--text-muted); text-align: center; padding: 2px 8px 6px; }
+  .output-node .result { font-size: 16px; font-weight: 700; text-align: center; padding: 8px 16px; }
+  .output-node .result.on { color: var(--green); }
+  .output-node .result.off { color: var(--text-muted); }
+
+  .sidebar { width: 340px; background: var(--surface); border-left: 1px solid var(--border); display: flex; flex-direction: column; overflow: hidden; }
+  .sidebar-tabs { display: flex; border-bottom: 1px solid var(--border); }
+  .sidebar-tabs button { flex: 1; padding: 10px 12px; background: none; border: none; color: var(--text-muted); font-family: inherit; font-size: 11px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; }
+  .sidebar-tabs button.active { color: var(--accent); border-bottom-color: var(--accent); background: rgba(79,143,247,0.05); }
+  .sidebar-tabs button:hover { color: var(--text); }
+  .sidebar-panel { flex: 1; overflow: auto; padding: 12px; display: none; }
+  .sidebar-panel.active { display: block; }
+  
+  .theory-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }
+  .theory-card h3 { font-size: 13px; font-weight: 700; margin-bottom: 6px; color: var(--accent); letter-spacing: 0.5px; }
+  .theory-card p { font-size: 11px; color: var(--text-muted); line-height: 1.6; }
+  .theory-card .tt-mini { margin-top: 8px; font-size: 10px; }
+  .theory-card .tt-mini table { width: 100%; border-collapse: collapse; }
+  .theory-card .tt-mini th, .theory-card .tt-mini td { padding: 3px 6px; text-align: center; border-bottom: 1px solid var(--border); }
+  .theory-card .tt-mini th { color: var(--text-muted); font-weight: 600; }
+  .theory-card .tt-mini td.v1 { color: var(--green); font-weight: 600; }
+  .theory-card .tt-mini td.v0 { color: var(--text-muted); }
+
+  table.truth-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  table.truth-table th { padding: 8px 10px; text-align: center; color: var(--text-muted); font-weight: 600; letter-spacing: 0.5px; border-bottom: 2px solid var(--border); position: sticky; top: 0; background: var(--surface); }
+  table.truth-table th.output-col { color: var(--accent); }
+  table.truth-table td { padding: 6px 10px; text-align: center; border-bottom: 1px solid var(--border); }
+  table.truth-table td.val-1 { color: var(--green); font-weight: 600; }
+  table.truth-table td.val-0 { color: var(--text-muted); }
+  table.truth-table tr:hover td { background: var(--surface2); }
+  .no-table { padding: 24px 16px; color: var(--text-muted); font-size: 12px; text-align: center; line-height: 1.6; }
+
+  .context-menu { position: fixed; z-index: 100; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 4px; min-width: 140px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
+  .context-menu button { display: block; width: 100%; padding: 8px 12px; background: none; border: none; color: var(--text); font-family: inherit; font-size: 12px; text-align: left; cursor: pointer; border-radius: 4px; }
+  .context-menu button:hover { background: var(--surface2); }
+  .context-menu button.danger { color: var(--red); }
+  .grid-bg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background-image: radial-gradient(circle, var(--border) 1px, transparent 1px); background-size: 24px 24px; opacity: 0.5; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1><span>⚡</span> Logic Gate Simulator</h1>
+  <div class="toolbar">
+    <button onclick="addNode('INPUT')">⊕ Input
+      <span class="gate-tip"><strong>INPUT</strong>User-controlled binary switch. Click to toggle between 0 and 1 to feed signals into your circuit.</span>
+    </button>
+    <button onclick="addNode('OUTPUT')">⊖ Output
+      <span class="gate-tip"><strong>OUTPUT</strong>Displays the final result of the circuit. Connect it to any gate's output to read the computed value.</span>
+    </button>
+    <div class="sep"></div>
+    <button onclick="addNode('AND')">AND
+      <span class="gate-tip"><strong>AND Gate</strong>Outputs 1 only when ALL inputs are 1. Like a series circuit — every switch must be on for current to flow.</span>
+    </button>
+    <button onclick="addNode('OR')">OR
+      <span class="gate-tip"><strong>OR Gate</strong>Outputs 1 when ANY input is 1. Like a parallel circuit — any single switch being on lets current through.</span>
+    </button>
+    <button onclick="addNode('NOT')">NOT
+      <span class="gate-tip"><strong>NOT Gate (Inverter)</strong>Flips the input: 0 becomes 1, 1 becomes 0. The simplest gate with only one input.</span>
+    </button>
+    <button onclick="addNode('NAND')">NAND
+      <span class="gate-tip"><strong>NAND Gate</strong>Opposite of AND — outputs 0 only when ALL inputs are 1. A universal gate: any circuit can be built using only NANDs.</span>
+    </button>
+    <button onclick="addNode('NOR')">NOR
+      <span class="gate-tip"><strong>NOR Gate</strong>Opposite of OR — outputs 1 only when ALL inputs are 0. Another universal gate capable of implementing any logic function.</span>
+    </button>
+    <button onclick="addNode('XOR')">XOR
+      <span class="gate-tip"><strong>XOR Gate (Exclusive OR)</strong>Outputs 1 when inputs differ. Essential for arithmetic circuits like half-adders and parity checkers.</span>
+    </button>
+  </div>
+  <div class="actions">
+    <button onclick="clearAll()">Clear All</button>
+    <button onclick="generateTruthTable()">⚙ Truth Table</button>
+  </div>
+</header>
+
+<div class="main">
+  <div id="canvas-wrap">
+    <div class="grid-bg" id="grid"></div>
+    <svg id="wires"></svg>
+    <div id="canvas"></div>
+  </div>
+  <div class="sidebar">
+    <div class="sidebar-tabs">
+      <button class="active" onclick="switchTab('truth-table')">Truth Table</button>
+      <button onclick="switchTab('theory')">Gate Theory</button>
+    </div>
+    <div class="sidebar-panel active" id="panel-truth-table">
+      <div class="no-table">Build a circuit and click<br><strong>⚙ Truth Table</strong> to generate.</div>
+    </div>
+    <div class="sidebar-panel" id="panel-theory">
+      <div class="theory-card">
+        <h3>AND Gate</h3>
+        <p>Outputs 1 only when <em>all</em> inputs are 1. Implements logical conjunction (A · B). Used in enable/mask circuits where all conditions must be met.</p>
+        <div class="tt-mini"><table><thead><tr><th>A</th><th>B</th><th>Out</th></tr></thead><tbody>
+          <tr><td class="v0">0</td><td class="v0">0</td><td class="v0">0</td></tr>
+          <tr><td class="v0">0</td><td class="v1">1</td><td class="v0">0</td></tr>
+          <tr><td class="v1">1</td><td class="v0">0</td><td class="v0">0</td></tr>
+          <tr><td class="v1">1</td><td class="v1">1</td><td class="v1">1</td></tr>
+        </tbody></table></div>
+      </div>
+      <div class="theory-card">
+        <h3>OR Gate</h3>
+        <p>Outputs 1 when <em>any</em> input is 1. Implements logical disjunction (A + B). Fundamental to decision circuits where at least one condition suffices.</p>
+        <div class="tt-mini"><table><thead><tr><th>A</th><th>B</th><th>Out</th></tr></thead><tbody>
+          <tr><td class="v0">0</td><td class="v0">0</td><td class="v0">0</td></tr>
+          <tr><td class="v0">0</td><td class="v1">1</td><td class="v1">1</td></tr>
+          <tr><td class="v1">1</td><td class="v0">0</td><td class="v1">1</td></tr>
+          <tr><td class="v1">1</td><td class="v1">1</td><td class="v1">1</td></tr>
+        </tbody></table></div>
+      </div>
+      <div class="theory-card">
+        <h3>NOT Gate (Inverter)</h3>
+        <p>Flips the input signal: 0→1, 1→0. Implements logical negation (¬A). The simplest gate — one input, one output.</p>
+        <div class="tt-mini"><table><thead><tr><th>A</th><th>Out</th></tr></thead><tbody>
+          <tr><td class="v0">0</td><td class="v1">1</td></tr>
+          <tr><td class="v1">1</td><td class="v0">0</td></tr>
+        </tbody></table></div>
+      </div>
+      <div class="theory-card">
+        <h3>NAND Gate</h3>
+        <p>Inverted AND — outputs 0 only when all inputs are 1. A <em>universal gate</em>: any Boolean function can be implemented using only NANDs.</p>
+        <div class="tt-mini"><table><thead><tr><th>A</th><th>B</th><th>Out</th></tr></thead><tbody>
+          <tr><td class="v0">0</td><td class="v0">0</td><td class="v1">1</td></tr>
+          <tr><td class="v0">0</td><td class="v1">1</td><td class="v1">1</td></tr>
+          <tr><td class="v1">1</td><td class="v0">0</td><td class="v1">1</td></tr>
+          <tr><td class="v1">1</td><td class="v1">1</td><td class="v0">0</td></tr>
+        </tbody></table></div>
+      </div>
+      <div class="theory-card">
+        <h3>NOR Gate</h3>
+        <p>Inverted OR — outputs 1 only when all inputs are 0. Another <em>universal gate</em>, historically used in early computers like the Apollo guidance system.</p>
+        <div class="tt-mini"><table><thead><tr><th>A</th><th>B</th><th>Out</th></tr></thead><tbody>
+          <tr><td class="v0">0</td><td class="v0">0</td><td class="v1">1</td></tr>
+          <tr><td class="v0">0</td><td class="v1">1</td><td class="v0">0</td></tr>
+          <tr><td class="v1">1</td><td class="v0">0</td><td class="v0">0</td></tr>
+          <tr><td class="v1">1</td><td class="v1">1</td><td class="v0">0</td></tr>
+        </tbody></table></div>
+      </div>
+      <div class="theory-card">
+        <h3>XOR Gate (Exclusive OR)</h3>
+        <p>Outputs 1 when inputs <em>differ</em>. Implements A ⊕ B. Critical in arithmetic (half-adders), error detection (parity bits), and cryptography.</p>
+        <div class="tt-mini"><table><thead><tr><th>A</th><th>B</th><th>Out</th></tr></thead><tbody>
+          <tr><td class="v0">0</td><td class="v0">0</td><td class="v0">0</td></tr>
+          <tr><td class="v0">0</td><td class="v1">1</td><td class="v1">1</td></tr>
+          <tr><td class="v1">1</td><td class="v0">0</td><td class="v1">1</td></tr>
+          <tr><td class="v1">1</td><td class="v1">1</td><td class="v0">0</td></tr>
+        </tbody></table></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="context-menu" id="ctx-menu" style="display:none">
+  <button onclick="adjustInputs(selectedNode, 1)">+ Add Input</button>
+  <button onclick="adjustInputs(selectedNode, -1)">− Remove Input</button>
+  <button onclick="deleteSelected()" class="danger">Delete</button>
+</div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const canvasWrap = document.getElementById('canvas-wrap');
+const wiresSvg = document.getElementById('wires');
+const ctxMenu = document.getElementById('ctx-menu');
+const grid = document.getElementById('grid');
+
+let nodes = [];
+let wires = [];
+let nextId = 0;
+let dragNode = null, dragOff = {x:0,y:0};
+let wireStart = null;
+let previewWire = null;
+let selectedNode = null;
+let pan = {x:0, y:0}, isPanning = false, panStart = {x:0,y:0};
+let inputCounter = 0;
+let outputCounter = 0;
+
+const gateTheory = {
+  AND: 'All inputs must be 1',
+  OR: 'Any input being 1 suffices',
+  NOT: 'Inverts the input',
+  NAND: 'AND then invert',
+  NOR: 'OR then invert',
+  XOR: '1 when inputs differ',
+};
+
+function uid() { return ++nextId; }
+
+function switchTab(tab) {
+  document.querySelectorAll('.sidebar-tabs button').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.sidebar-panel').forEach(p => p.classList.remove('active'));
+  document.querySelector(`.sidebar-tabs button[onclick*="${tab}"]`).classList.add('active');
+  document.getElementById('panel-' + tab).classList.add('active');
+}
+
+function addNode(type) {
+  const id = uid();
+  const inputCount = type === 'NOT' ? 1 : (type === 'INPUT' || type === 'OUTPUT') ? 0 : 2;
+  const outputCount = (type === 'OUTPUT') ? 0 : 1;
+  const realInputs = type === 'OUTPUT' ? 1 : inputCount;
+  const realOutputs = type === 'INPUT' ? 1 : outputCount;
+
+  let label = '';
+  if (type === 'INPUT') { label = 'IN ' + (++inputCounter); }
+  if (type === 'OUTPUT') { label = 'OUT ' + (++outputCounter); }
+
+  const node = {
+    id, type, label,
+    x: 200 + Math.random()*300 + pan.x*-1,
+    y: 150 + Math.random()*200 + pan.y*-1,
+    inputs: Array(realInputs).fill(null),
+    outputs: [],
+    value: type === 'INPUT' ? 0 : null,
+    inputValues: Array(realInputs).fill(0),
+    outputValue: type === 'INPUT' ? 0 : 0,
+  };
+  nodes.push(node);
+  renderNode(node);
+  simulate();
+  return node;
+}
+
+function renderNode(node) {
+  let el = document.getElementById('node-'+node.id);
+  if (el) el.remove();
+
+  el = document.createElement('div');
+  el.id = 'node-'+node.id;
+  el.className = 'gate' + (node.type === 'INPUT' ? ' input-node' : '') + (node.type === 'OUTPUT' ? ' output-node' : '');
+  if (selectedNode === node.id) el.classList.add('selected');
+  el.style.left = (node.x + pan.x) + 'px';
+  el.style.top = (node.y + pan.y) + 'px';
+
+  const multiInput = ['AND','OR','NAND','NOR','XOR','XNOR'].includes(node.type);
+  let headerContent = node.label || node.type;
+  if (multiInput) {
+    headerContent = `<span class="pin-count-btns"><button class="pin-count-btn" data-adjust="${node.id}" data-dir="-1">−</button></span>${node.type}<span class="pin-count-btns"><button class="pin-count-btn" data-adjust="${node.id}" data-dir="1">+</button></span>`;
+  }
+  let header = `<div class="gate-header">${headerContent}</div>`;
+  let theory = gateTheory[node.type] ? `<div class="gate-theory">${gateTheory[node.type]}</div>` : '';
+  let body = '';
+
+  if (node.type === 'INPUT') {
+    body = `<div class="gate-body"><div class="gate-pins outputs"><div class="pin output-pin ${node.value?'active':'value-0'}" data-node="${node.id}" data-pin-type="output" data-pin-index="0"></div></div><button class="toggle-btn ${node.value?'on':''}" data-toggle="${node.id}">${node.value}</button></div><div class="input-label">Click to toggle</div>`;
+  } else if (node.type === 'OUTPUT') {
+    body = `<div class="gate-body"><div class="gate-pins inputs"><div class="pin input-pin ${node.outputValue?'active':'value-0'}" data-node="${node.id}" data-pin-type="input" data-pin-index="0"></div></div><div class="result ${node.outputValue?'on':'off'}">${node.outputValue}</div></div>`;
+  } else {
+    let inPins = '';
+    for (let i = 0; i < node.inputs.length; i++) {
+      inPins += `<div class="pin input-pin ${node.inputValues[i]?'active':'value-0'}" data-node="${node.id}" data-pin-type="input" data-pin-index="${i}"></div>`;
+    }
+    let outPins = `<div class="pin output-pin ${node.outputValue?'active':'value-0'}" data-node="${node.id}" data-pin-type="output" data-pin-index="0"></div>`;
+    body = `<div class="gate-body"><div class="gate-pins inputs">${inPins}</div><div class="gate-pins outputs">${outPins}</div></div>`;
+  }
+
+  el.innerHTML = header + theory + body;
+  canvas.appendChild(el);
+}
+
+function getPinPos(nodeId, pinType, pinIndex) {
+  const pin = document.querySelector(`.pin[data-node="${nodeId}"][data-pin-type="${pinType}"][data-pin-index="${pinIndex}"]`);
+  if (!pin) return {x:0,y:0};
+  const r = pin.getBoundingClientRect();
+  const wr = canvasWrap.getBoundingClientRect();
+  return { x: r.left - wr.left + r.width/2, y: r.top - wr.top + r.height/2 };
+}
+
+function renderWires() {
+  let html = '';
+  for (const w of wires) {
+    const from = getPinPos(w.fromNode, 'output', w.fromPin);
+    const to = getPinPos(w.toNode, 'input', w.toPin);
+    const dx = Math.abs(to.x - from.x) * 0.5;
+    const d = `M${from.x},${from.y} C${from.x+dx},${from.y} ${to.x-dx},${to.y} ${to.x},${to.y}`;
+    const active = w.value ? 'wire-active' : 'wire-inactive';
+    html += `<path class="wire-bg" d="${d}"/>`;
+    html += `<path class="${active}" d="${d}"/>`;
+    // Signal flow pulse on active wires
+    if (w.value) {
+      html += `<path class="wire-pulse" d="${d}"/>`;
+    }
+  }
+  if (previewWire) {
+    const dx = Math.abs(previewWire.x2 - previewWire.x1) * 0.5;
+    const d = `M${previewWire.x1},${previewWire.y1} C${previewWire.x1+dx},${previewWire.y1} ${previewWire.x2-dx},${previewWire.y2} ${previewWire.x2},${previewWire.y2}`;
+    html += `<path class="wire-preview" d="${d}"/>`;
+  }
+  wiresSvg.innerHTML = html;
+}
+
+function evaluate(type, inputs) {
+  switch(type) {
+    case 'AND': return inputs.every(v=>v===1) ? 1 : 0;
+    case 'OR': return inputs.some(v=>v===1) ? 1 : 0;
+    case 'NOT': return inputs[0] ? 0 : 1;
+    case 'NAND': return inputs.every(v=>v===1) ? 0 : 1;
+    case 'NOR': return inputs.some(v=>v===1) ? 0 : 1;
+    case 'XOR': return inputs.reduce((a,b)=>a^b, 0);
+    default: return 0;
+  }
+}
+
+function simulate() {
+  for (const n of nodes) {
+    if (n.type !== 'INPUT') {
+      n.inputValues = n.inputs.map(() => 0);
+      n.outputValue = 0;
+    } else {
+      n.outputValue = n.value;
+    }
+  }
+
+  for (let iter = 0; iter < 20; iter++) {
+    for (const w of wires) {
+      const fromNode = nodes.find(n=>n.id===w.fromNode);
+      if (fromNode) {
+        w.value = fromNode.outputValue;
+        const toNode = nodes.find(n=>n.id===w.toNode);
+        if (toNode) {
+          toNode.inputValues[w.toPin] = fromNode.outputValue;
+        }
+      }
+    }
+    for (const n of nodes) {
+      if (n.type === 'INPUT') continue;
+      if (n.type === 'OUTPUT') {
+        n.outputValue = n.inputValues[0] || 0;
+      } else {
+        n.outputValue = evaluate(n.type, n.inputValues);
+      }
+    }
+  }
+
+  for (const n of nodes) renderNode(n);
+  renderWires();
+}
+
+function adjustInputs(nodeId, dir) {
+  const node = nodes.find(n => n.id === nodeId);
+  if (!node) return;
+  const multiInput = ['AND','OR','NAND','NOR','XOR','XNOR'].includes(node.type);
+  if (!multiInput) return;
+  const newCount = node.inputs.length + dir;
+  if (newCount < 2 || newCount > 8) return;
+  if (dir > 0) {
+    node.inputs.push(null);
+    node.inputValues.push(0);
+  } else {
+    // Remove last input and any wire connected to it
+    const lastIdx = node.inputs.length - 1;
+    wires = wires.filter(w => !(w.toNode === node.id && w.toPin === lastIdx));
+    node.inputs.pop();
+    node.inputValues.pop();
+  }
+  simulate();
+  ctxMenu.style.display = 'none';
+}
+
+// --- Interaction ---
+
+canvas.addEventListener('mousedown', e => {
+  const adjBtn = e.target.closest('[data-adjust]');
+  if (adjBtn) {
+    e.stopPropagation();
+    adjustInputs(+adjBtn.dataset.adjust, +adjBtn.dataset.dir);
+    return;
+  }
+  const pin = e.target.closest('.pin');
+  if (pin) {
+    e.stopPropagation();
+    const nodeId = +pin.dataset.node;
+    const pinType = pin.dataset.pinType;
+    const pinIdx = +pin.dataset.pinIndex;
+
+    if (pinType === 'input') {
+      const existingWire = wires.findIndex(w => w.toNode === nodeId && w.toPin === pinIdx);
+      if (existingWire >= 0) { wires.splice(existingWire, 1); simulate(); return; }
+    }
+
+    wireStart = { nodeId, pinType, pinIndex: pinIdx };
+    const pos = getPinPos(nodeId, pinType, pinIdx);
+    previewWire = { x1: pos.x, y1: pos.y, x2: pos.x, y2: pos.y };
+    return;
+  }
+
+  const toggle = e.target.closest('[data-toggle]');
+  if (toggle) {
+    const nodeId = +toggle.dataset.toggle;
+    const node = nodes.find(n=>n.id===nodeId);
+    if (node) { node.value = node.value ? 0 : 1; node.outputValue = node.value; simulate(); }
+    return;
+  }
+
+  const gate = e.target.closest('.gate');
+  if (gate) {
+    const nodeId = +gate.id.replace('node-','');
+    selectedNode = nodeId;
+    const node = nodes.find(n=>n.id===nodeId);
+    dragNode = node;
+    const r = gate.getBoundingClientRect();
+    dragOff = { x: e.clientX - r.left, y: e.clientY - r.top };
+    canvasWrap.classList.add('dragging-gate');
+    for (const n of nodes) renderNode(n);
+    renderWires();
+    return;
+  }
+
+  selectedNode = null;
+  for (const n of nodes) renderNode(n);
+  isPanning = true;
+  panStart = { x: e.clientX - pan.x, y: e.clientY - pan.y };
+  canvasWrap.classList.add('panning');
+});
+
+window.addEventListener('mousemove', e => {
+  if (dragNode) {
+    dragNode.x = e.clientX - canvasWrap.getBoundingClientRect().left - dragOff.x - pan.x;
+    dragNode.y = e.clientY - canvasWrap.getBoundingClientRect().top - dragOff.y - pan.y;
+    renderNode(dragNode);
+    renderWires();
+  }
+  if (wireStart && previewWire) {
+    const wr = canvasWrap.getBoundingClientRect();
+    previewWire.x2 = e.clientX - wr.left;
+    previewWire.y2 = e.clientY - wr.top;
+    renderWires();
+  }
+  if (isPanning) {
+    pan.x = e.clientX - panStart.x;
+    pan.y = e.clientY - panStart.y;
+    for (const n of nodes) renderNode(n);
+    grid.style.backgroundPosition = `${pan.x}px ${pan.y}px`;
+    renderWires();
+  }
+});
+
+window.addEventListener('mouseup', e => {
+  if (dragNode) { dragNode = null; canvasWrap.classList.remove('dragging-gate'); }
+  if (isPanning) { isPanning = false; canvasWrap.classList.remove('panning'); }
+
+  if (wireStart) {
+    const pin = e.target.closest('.pin');
+    if (pin) {
+      const toNodeId = +pin.dataset.node;
+      const toPinType = pin.dataset.pinType;
+      const toPinIdx = +pin.dataset.pinIndex;
+
+      let fromNode, fromPin, toNode, toPin;
+      if (wireStart.pinType === 'output' && toPinType === 'input') {
+        fromNode = wireStart.nodeId; fromPin = wireStart.pinIndex;
+        toNode = toNodeId; toPin = toPinIdx;
+      } else if (wireStart.pinType === 'input' && toPinType === 'output') {
+        fromNode = toNodeId; fromPin = toPinIdx;
+        toNode = wireStart.nodeId; toPin = wireStart.pinIndex;
+      }
+
+      if (fromNode !== undefined && fromNode !== toNode) {
+        wires = wires.filter(w => !(w.toNode === toNode && w.toPin === toPin));
+        wires.push({ fromNode, fromPin, toNode, toPin, value: 0 });
+        simulate();
+      }
+    }
+    wireStart = null;
+    previewWire = null;
+    renderWires();
+  }
+});
+
+// Context menu
+canvas.addEventListener('contextmenu', e => {
+  e.preventDefault();
+  const gate = e.target.closest('.gate');
+  if (gate) {
+    selectedNode = +gate.id.replace('node-','');
+    for (const n of nodes) renderNode(n);
+    ctxMenu.style.display = 'block';
+    ctxMenu.style.left = e.clientX + 'px';
+    ctxMenu.style.top = e.clientY + 'px';
+  }
+});
+document.addEventListener('click', () => { ctxMenu.style.display = 'none'; });
+
+function deleteSelected() {
+  if (selectedNode == null) return;
+  wires = wires.filter(w => w.fromNode !== selectedNode && w.toNode !== selectedNode);
+  nodes = nodes.filter(n => n.id !== selectedNode);
+  const el = document.getElementById('node-'+selectedNode);
+  if (el) el.remove();
+  selectedNode = null;
+  simulate();
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Delete' || e.key === 'Backspace') {
+    if (document.activeElement === document.body) deleteSelected();
+  }
+});
+
+function clearAll() {
+  nodes = []; wires = []; selectedNode = null;
+  inputCounter = 0; outputCounter = 0;
+  canvas.innerHTML = '';
+  wiresSvg.innerHTML = '';
+  document.querySelector('#panel-truth-table').innerHTML = '<div class="no-table">Build a circuit and click<br><strong>⚙ Truth Table</strong> to generate.</div>';
+}
+
+function generateTruthTable() {
+  const inputs = nodes.filter(n => n.type === 'INPUT');
+  const outputs = nodes.filter(n => n.type === 'OUTPUT');
+  const wrap = document.querySelector('#panel-truth-table');
+
+  if (!inputs.length || !outputs.length) {
+    wrap.innerHTML = '<div class="no-table">Add at least one Input and one Output node.</div>';
+    switchTab('truth-table');
+    return;
+  }
+
+  const savedValues = inputs.map(n => n.value);
+  const rows = [];
+  const combos = 1 << inputs.length;
+
+  for (let c = 0; c < combos; c++) {
+    for (let i = 0; i < inputs.length; i++) {
+      inputs[i].value = (c >> (inputs.length - 1 - i)) & 1;
+      inputs[i].outputValue = inputs[i].value;
+    }
+    for (const n of nodes) { if (n.type !== 'INPUT') { n.inputValues = n.inputs.map(()=>0); n.outputValue = 0; } }
+    for (let iter = 0; iter < 20; iter++) {
+      for (const w of wires) {
+        const fn = nodes.find(n=>n.id===w.fromNode);
+        if (fn) { w.value = fn.outputValue; const tn = nodes.find(n=>n.id===w.toNode); if(tn) tn.inputValues[w.toPin] = fn.outputValue; }
+      }
+      for (const n of nodes) {
+        if (n.type === 'INPUT') continue;
+        if (n.type === 'OUTPUT') n.outputValue = n.inputValues[0]||0;
+        else n.outputValue = evaluate(n.type, n.inputValues);
+      }
+    }
+    rows.push({ inputs: inputs.map(n=>n.value), outputs: outputs.map(n=>n.outputValue) });
+  }
+
+  // Restore
+  inputs.forEach((n,i) => { n.value = savedValues[i]; n.outputValue = n.value; });
+  simulate();
+
+  let html = '<table class="truth-table"><thead><tr>';
+  inputs.forEach((n,i) => html += `<th>${n.label || 'IN '+(i+1)}</th>`);
+  outputs.forEach((n,i) => html += `<th class="output-col">${n.label || 'OUT '+(i+1)}</th>`);
+  html += '</tr></thead><tbody>';
+  for (const r of rows) {
+    html += '<tr>';
+    r.inputs.forEach(v => html += `<td class="val-${v}">${v}</td>`);
+    r.outputs.forEach(v => html += `<td class="val-${v}">${v}</td>`);
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  wrap.innerHTML = html;
+  switchTab('truth-table');
+}
+</script>
+</body>
+</html>
